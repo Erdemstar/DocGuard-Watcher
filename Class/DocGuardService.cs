@@ -2,6 +2,7 @@
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.ServiceProcess;
@@ -18,8 +19,6 @@ namespace DocGuard_Watcher.Class
         public string Password { get; set; }
         public string Token { get; set; }
         public string Url { get; set; }
-
-        public string _logFileLocation = @"C:\Users\Erdemstar\Desktop\servicelog.txt";
 
         private FileSystemWatcher Watcher = null;
 
@@ -41,8 +40,9 @@ namespace DocGuard_Watcher.Class
 
         protected override void OnStart(string[] args)
         {
-            Log("Starting");
+            Log("DocGuard-Watcher Service is starting", "Info");
             readConfig();
+            variableStatus();
             foreach (var drive in DriveInfo.GetDrives())
             {
                 //File watcher create
@@ -52,7 +52,7 @@ namespace DocGuard_Watcher.Class
                     Filters = { ".hta", "*.pdf", "*.slk", "*.csv", "*.doc", "*.dot", "*.docx", "*.docm", "*.dotx", "*.dotm",
                     "*.wll", "*.xls", "*.xll", "*.xlw", "*.xlt", "*.xlsx", "*.xlsm", "*.xlsb", "*.xlam", "*.xltx", "*.xltm", "*.ppt", "*.pps",
                     "*.pptx", "*.pptm", "*.ppsx", "*.ppam", "*.ppa", "*.rtf", "*.bin", "*.pub" },
-                    NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.CreationTime | NotifyFilters.CreationTime,
+                    NotifyFilter = NotifyFilters.LastWrite |NotifyFilters.LastAccess | NotifyFilters.CreationTime | NotifyFilters.DirectoryName,
                     InternalBufferSize = 8192 * 8, // 64k
                     IncludeSubdirectories = true,
                     EnableRaisingEvents = true
@@ -63,15 +63,12 @@ namespace DocGuard_Watcher.Class
                 Watcher.Renamed += new RenamedEventHandler(OnRenamed);
 
             }
-
-            variableStatus();
-
             base.OnStart(args);
         }
 
         protected override void OnStop()
         {
-            Log("Stopping");
+            Log("DocGuard-Watcher Service is Stopping", "Info");
             Watcher.EnableRaisingEvents = false;
             Watcher.Dispose();
 
@@ -80,9 +77,10 @@ namespace DocGuard_Watcher.Class
 
         protected override void OnPause()
         {
-            Log("Pausing");
+            Log("DocGuard-Watcher Service is Pausing", "Info");
             Watcher.EnableRaisingEvents = false;
             Watcher.Dispose();
+
             base.OnPause();
         }
 
@@ -97,7 +95,6 @@ namespace DocGuard_Watcher.Class
 
             if (control)
             {
-                Log("\nOnChanged : " + e.FullPath);
                 getFile(e.FullPath, Path.GetFileName(e.FullPath));
             }
         }
@@ -111,7 +108,6 @@ namespace DocGuard_Watcher.Class
 
             if (control == true)
             {
-                Log("\nOnRenamed : " + e.FullPath);
                 getFile(e.FullPath, Path.GetFileName(e.FullPath));
             }
 
@@ -150,6 +146,14 @@ namespace DocGuard_Watcher.Class
                     {
                         Url = key.GetValue("Url").ToString();
                     }
+
+                    getToken();
+
+                }
+                else
+                {
+                    Log("Register path is null so DocGuard-Watcher will not work anymore", "Warning");
+                    Stop();
                 }
 
             }
@@ -189,7 +193,7 @@ namespace DocGuard_Watcher.Class
                 {
                     //username password gelip login esnasında hata alınmışsa username password hatalı veya bir yerden bir problem var
                     // burada service'i durdurmak lazım diğer türlü yüklenecekd dosyalar public olacaktır.
-                    Log("There is error while sending login request. Please control your connection");
+                    Log("There is error while sending login request. Please control your connection", "Error");
                     Stop();
                 }
 
@@ -206,26 +210,26 @@ namespace DocGuard_Watcher.Class
                         {
                             //token parse edereken esnasında hata alınmışsa bir yerden bir problem var
                             //burada service'i durdurmak lazım diğer türlü yüklenecekd dosyalar public olacaktır.
-                            Log("There is error while parsing Token response. Please try to login DocGuard on Web UI and control your credentials");
+                            Log("There is error while parsing Token response. Please try to login DocGuard on Web UI and control your credentials", "Error");
                             Stop();
                         }
                     }
                     else
                     {
                         //eger token yoksa email password hatalı ne yapmak lazım ?
-                        Log("There is error while taking a token. The credential you provided may be wrong please control it");
+                        Log("There is error while taking a token. The credential you provided may be wrong please control it", "Error");
                         Stop();
                     }
                 }
                 else
                 {
                     //eger gelen cevap nullsa login isteğinin cevabı bile yok ne yapmak lazım
-                    Log("There is response which has null");
+                    Log("There is response which has null", "Error");
                     Stop();
                 }
 
             }
-            
+
         }
 
         //Take a filePath then send it fileUpload then parse output
@@ -239,30 +243,22 @@ namespace DocGuard_Watcher.Class
             }
             catch (Exception ex)
             {
-                Log("\n[!] File name : " + fileName + " - Error message : " + ex.ToString());
+                string message = String.Format("File name : {0}\nError message : {1}", fileName, ex.ToString());
+                Log(message, "Warning");
             }
 
             if (!(response is null))
             {
-                if (Token is null)
-                {
-                    Log("Status : " + "Public");
-                }
-                else
-                {
-                    Log("Token : " + "Restricted");
-                }
-
                 if (response.ContainsKey("Error"))
                 {
-                    var message = String.Format("\nFile Name : {0}\nError : {1}", fileName, response["Error"].ToString());
-                    Log(message);
+                    var message = String.Format("File Name : {0}\nError : {1}\nToken : {2}", fileName, response["Error"].ToString(), Token);
+                    Log(message, "Info");
                 }
                 else if (response.ContainsKey("Verdict"))
                 {
-                    var message = String.Format("\nFile Name : {0}\nFileType : {1}\nVerdict : {2}\nFileMD5Hash : {3}"
-                        , fileName, response["FileType"].ToString(), response["Verdict"].ToString(), response["FileMD5Hash"].ToString());
-                    Log(message);
+                    var message = String.Format("File Name : {0}\nFileType : {1}\nVerdict : {2}\nFileMD5Hash : {3}\nToken : {4}"
+                        , fileName, response["FileType"].ToString(), response["Verdict"].ToString(), response["FileMD5Hash"].ToString(), Token);
+                    Log(message,"Info");
 
                 }
             }
@@ -305,7 +301,8 @@ namespace DocGuard_Watcher.Class
             }
             catch (Exception ex)
             {
-                Log("\n[!] File name : " + FileName + " - Error message : " + ex.ToString());
+                string message = String.Format("File name : {0}\nError message : {1}", FileName, ex.ToString());
+                Log(message, "Warning");
                 return null;
             }
 
@@ -315,27 +312,31 @@ namespace DocGuard_Watcher.Class
         //
         public void variableStatus()
         {
-            Log("Email : " + Email);
-            Log("Password : " + Password);
-            Log("Url : " + Url);
+            string message = String.Format("Email : {0}\nPassword : {1}\nUrl : {2}\nToken : {3}", Email, Password, Url, Token);
+            Log(message, "Info");
 
-            getToken();
-
-            Log("Token : " + Token);
         }
 
         //write Output
-        public void Log(string logMessage)
+        public void Log(string logMessage, string type)
         {
-            try
+            using (EventLog eventLog = new EventLog("Application"))
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_logFileLocation));
-                File.AppendAllText(_logFileLocation, DateTime.UtcNow.ToString() + " : " + logMessage + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
+                eventLog.Source = "DocGuard-Watcher";
 
-                throw;
+                if (type == "Info")
+                {
+                    eventLog.WriteEntry(logMessage, EventLogEntryType.Information, 10000);
+                }
+                else if (type == "Warning")
+                {
+                    eventLog.WriteEntry(logMessage, EventLogEntryType.Warning, 10001);
+                }
+                else if (type == "Error")
+                {
+                    eventLog.WriteEntry(logMessage, EventLogEntryType.Error, 10002);
+                }
+
             }
         }
         #endregion
