@@ -1,9 +1,6 @@
 ﻿using System;
-using DocGuard_Watcher.Class;
 using System.ServiceProcess;
-using Newtonsoft.Json.Linq;
-using System.IO;
-using System.Net.Http;
+using DocGuard_Watcher.Class;
 
 namespace DocGuard_Watcher
 {
@@ -12,6 +9,7 @@ namespace DocGuard_Watcher
         static void Main(string[] args)
         {
             ServiceBase.Run(new DocGuardService());
+
         }
     }
 }

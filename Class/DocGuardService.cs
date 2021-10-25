@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using Microsoft.Win32;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -28,10 +29,10 @@ namespace DocGuard_Watcher.Class
 
         public DocGuardService()
         {
-            Email = null;
-            Password = null;
+            Email = "";
+            Password = "";
             Token = null;
-            Url = "https://api.docguard.net:8443";
+            Url = "https://api.docguard.net:8443/";
         }
 
         #endregion
@@ -41,12 +42,7 @@ namespace DocGuard_Watcher.Class
         protected override void OnStart(string[] args)
         {
             Log("Starting");
-
-            if (args.Length == 1)
-            {
-                readConfig(args[0]);
-            }
-
+            readConfig();
             foreach (var drive in DriveInfo.GetDrives())
             {
                 //File watcher create
@@ -67,6 +63,9 @@ namespace DocGuard_Watcher.Class
                 Watcher.Renamed += new RenamedEventHandler(OnRenamed);
 
             }
+
+            variableStatus();
+
             base.OnStart(args);
         }
 
@@ -94,7 +93,6 @@ namespace DocGuard_Watcher.Class
         //
         public void OnChanged(object sender, FileSystemEventArgs e)
         {
-
             var control = eventControl(e.FullPath);
 
             if (control)
@@ -127,7 +125,7 @@ namespace DocGuard_Watcher.Class
         public bool eventControl(string filePath)
         {
 
-            if (Regex.IsMatch(filePath,@"\$|\~\$"))
+            if (Regex.IsMatch(filePath, @"\$|\~\$"))
             {
                 return false;
             }
@@ -137,57 +135,32 @@ namespace DocGuard_Watcher.Class
             }
         }
 
-        //
-        public void readConfig(string configFilePath)
+        //read config file which is comming from user
+        public void readConfig()
         {
-            Log("Config path : " + configFilePath);
+            //opening the subkey  
+            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\DocGuard-Watcher"))
+            {
+                //if it does exist, retrieve the stored values  
+                if (!(key is null))
+                {
+                    Email = key.GetValue("email").ToString();
+                    Password = key.GetValue("password").ToString();
+                    if (!(key.GetValue("url").ToString() is null))
+                    {
+                        Url = key.GetValue("Url").ToString();
+                    }
+                }
 
-            JObject data;
-            try
-            {
-                data = JObject.Parse(File.ReadAllText(configFilePath));
-            }
-            catch
-            {
-                throw;
-            }
-            if (!(data is null))
-            {
-                try
-                {
-                    Email = data["email"].ToString();
-                    Password = data["password"].ToString();
-
-                    Log("Email : " + Email);
-                    Log("Password : " + Password);
-
-                }
-                catch (Exception ex)
-                {
-                    //Username password'de bir hata varsa service'in durması lazım çünkü yüklenece dosyalar diğer türlü public olacaktır.
-                    throw;
-                }
-                try
-                {
-                    Url = data["url"].ToString();
-                    Log("Url : " + Url);
-                }
-                catch (Exception ex)
-                {
-                    Url = "https://api.docguard.net:8443/";
-                }
-            }
-            else
-            {
-                //eğer verilen configFile null ise de bir hata vermek gerekir diper tülü yüklenece dosyalar public olacaktır.
             }
 
         }
-        
-        //
+
+        //send login request and take user's jwt
         public void getToken()
         {
-            if (!(Email is null && Password is null))
+            // if Email and Password is provided user wants to store anaylze privately otherwise anaylze will be public
+            if (Email != "" || Password != "")
             {
                 string resp = null;
 
@@ -216,7 +189,8 @@ namespace DocGuard_Watcher.Class
                 {
                     //username password gelip login esnasında hata alınmışsa username password hatalı veya bir yerden bir problem var
                     // burada service'i durdurmak lazım diğer türlü yüklenecekd dosyalar public olacaktır.
-                    throw;
+                    Log("There is error while sending login request. Please control your connection");
+                    Stop();
                 }
 
                 //Control resp for token
@@ -227,36 +201,36 @@ namespace DocGuard_Watcher.Class
                         try
                         {
                             Token = JObject.Parse(resp)["Token"].ToString();
-                            Log("Token : " + Token);
                         }
                         catch (Exception ex)
                         {
                             //token parse edereken esnasında hata alınmışsa bir yerden bir problem var
                             //burada service'i durdurmak lazım diğer türlü yüklenecekd dosyalar public olacaktır.
-                            throw;
+                            Log("There is error while parsing Token response. Please try to login DocGuard on Web UI and control your credentials");
+                            Stop();
                         }
                     }
                     else
                     {
                         //eger token yoksa email password hatalı ne yapmak lazım ?
+                        Log("There is error while taking a token. The credential you provided may be wrong please control it");
+                        Stop();
                     }
                 }
                 else
                 {
                     //eger gelen cevap nullsa login isteğinin cevabı bile yok ne yapmak lazım
+                    Log("There is response which has null");
+                    Stop();
                 }
 
             }
-            else
-            {
-                //Verilen config dosyadın email ve password null ise ne olacak ? 
-            }
+            
         }
 
         //Take a filePath then send it fileUpload then parse output
         public void getFile(string file, string fileName)
         {
-
             JObject response = null;
 
             try
@@ -270,6 +244,15 @@ namespace DocGuard_Watcher.Class
 
             if (!(response is null))
             {
+                if (Token is null)
+                {
+                    Log("Status : " + "Public");
+                }
+                else
+                {
+                    Log("Token : " + "Restricted");
+                }
+
                 if (response.ContainsKey("Error"))
                 {
                     var message = String.Format("\nFile Name : {0}\nError : {1}", fileName, response["Error"].ToString());
@@ -277,7 +260,7 @@ namespace DocGuard_Watcher.Class
                 }
                 else if (response.ContainsKey("Verdict"))
                 {
-                    var message = String.Format("\nFile Name : {0}\nFileType : {1}\nVerdict : {2}\nFileMD5Hash : {3}\n"
+                    var message = String.Format("\nFile Name : {0}\nFileType : {1}\nVerdict : {2}\nFileMD5Hash : {3}"
                         , fileName, response["FileType"].ToString(), response["Verdict"].ToString(), response["FileMD5Hash"].ToString());
                     Log(message);
 
@@ -327,6 +310,18 @@ namespace DocGuard_Watcher.Class
             }
 
             return null;
+        }
+
+        //
+        public void variableStatus()
+        {
+            Log("Email : " + Email);
+            Log("Password : " + Password);
+            Log("Url : " + Url);
+
+            getToken();
+
+            Log("Token : " + Token);
         }
 
         //write Output
