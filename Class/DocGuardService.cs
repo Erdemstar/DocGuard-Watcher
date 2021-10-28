@@ -19,6 +19,7 @@ namespace DocGuard_Watcher.Class
         public string Password { get; set; }
         public string Token { get; set; }
         public string Url { get; set; }
+        public bool warningShow = false;
 
         private FileSystemWatcher Watcher = null;
 
@@ -43,6 +44,10 @@ namespace DocGuard_Watcher.Class
             Log("DocGuard-Watcher Service is starting", "Info");
             readConfig();
             variableStatus();
+
+            if (args.Length == 1) { if (args[0] == "--warning") { warningShow = true; } }
+
+
             foreach (var drive in DriveInfo.GetDrives())
             {
                 //File watcher create
@@ -152,7 +157,7 @@ namespace DocGuard_Watcher.Class
                 }
                 else
                 {
-                    Log("Register path is null so DocGuard-Watcher will not work anymore", "Warning");
+                    Log("Register path is null so DocGuard-Watcher will not work anymore", "Error");
                     Stop();
                 }
 
@@ -164,7 +169,7 @@ namespace DocGuard_Watcher.Class
         public void getToken()
         {
             // if Email and Password is provided user wants to store anaylze privately otherwise anaylze will be public
-            if (Email != "" || Password != "")
+            if (Email != "" && Password != "")
             {
                 string resp = null;
 
@@ -194,7 +199,7 @@ namespace DocGuard_Watcher.Class
                     //username password gelip login esnasında hata alınmışsa username password hatalı veya bir yerden bir problem var
                     // burada service'i durdurmak lazım diğer türlü yüklenecekd dosyalar public olacaktır.
                     Log("There is error while sending login request. Please control your connection", "Error");
-                    Stop();
+                    return;
                 }
 
                 //Control resp for token
@@ -221,12 +226,6 @@ namespace DocGuard_Watcher.Class
                         Stop();
                     }
                 }
-                else
-                {
-                    //eger gelen cevap nullsa login isteğinin cevabı bile yok ne yapmak lazım
-                    Log("There is response which has null", "Error");
-                    Stop();
-                }
 
             }
 
@@ -243,8 +242,12 @@ namespace DocGuard_Watcher.Class
             }
             catch (Exception ex)
             {
-                string message = String.Format("File name : {0}\nError message : {1}", fileName, ex.ToString());
-                Log(message, "Warning");
+                if (warningShow)
+                {
+                    string message = String.Format("File name : {0}\nError message : {1}", fileName, ex.ToString());
+                    Log(message, "Warning");
+                }
+                
             }
 
             if (!(response is null))
@@ -301,8 +304,12 @@ namespace DocGuard_Watcher.Class
             }
             catch (Exception ex)
             {
-                string message = String.Format("File name : {0}\nError message : {1}", FileName, ex.ToString());
-                Log(message, "Warning");
+                if (warningShow)
+                {
+                    string message = String.Format("File name : {0}\nError message : {1}", FileName, ex.ToString());
+                    Log(message, "Warning");
+                }
+
                 return null;
             }
 
